@@ -1,83 +1,131 @@
 import re
 
 # ==============================================================================
-# CONFIGURACIÓN
-# Modifica estas variables para adaptar los scripts a tu juego.
+# CONFIGURACIÓN PRINCIPAL PARA EL USUARIO
+# ==============================================================================
+
+# --- Lista de Códigos de Evento a Extraer ---
+# Añade o elimina códigos de evento de esta lista para controlar qué textos se
+# extraen. El script buscará en la "base de datos" de abajo cómo manejar cada
+# uno de estos códigos.
+EXTRACTABLE_EVENT_CODES = [
+    # --- MENSAJES ---
+    101,  # Nombre del hablante en "Mostrar Texto"
+    102,  # Textos de las opciones en "Mostrar Opciones"
+    401,  # Cuerpo del mensaje en "Mostrar Texto"
+    405,  # Texto completo en "Mostrar Texto Desplazable"
+    108,  # Comentarios (a menudo usados para notas o texto a traducir)
+
+    # --- ACTORES ---
+    320,  # Cambiar Nombre de Actor
+    324,  # Cambiar Apodo de Actor
+    325,  # Cambiar Perfil de Actor
+
+    # --- SCRIPTS (CASO AVANZADO) ---
+    355,  # Comando "Script" (extrae texto de dentro de cadenas de JS)
+    655,  # Comando "Script" (continuación)
+]
+
+
+# ==============================================================================
+# BASE DE DATOS DE MANEJADORES DE CÓDIGOS DE EVENTO
+# (Normalmente no necesitas modificar esto, a menos que encuentres un nuevo
+# código de evento o un patrón de script no soportado)
+# ==============================================================================
+
+EVENT_CODE_HANDLERS = {
+    # --- MENSAJES ---
+    101: {
+        "description": "Nombre del Hablante (Show Text)",
+        "type": "simple",
+        "param_index": 4
+    },
+    102: {
+        "description": "Opciones (Show Choices)",
+        "type": "array",
+        "param_index": 0
+    },
+    401: {
+        "description": "Cuerpo del Mensaje (Show Text)",
+        "type": "simple",
+        "param_index": 0
+    },
+    405: {
+        "description": "Texto Desplazable (Show Scrolling Text)",
+        "type": "simple",
+        "param_index": 0
+    },
+    108: {
+        "description": "Comentario (Comment)",
+        "type": "simple",
+        "param_index": 0
+    },
+
+    # --- ACTORES ---
+    320: {
+        "description": "Cambiar Nombre de Actor (Change Actor Name)",
+        "type": "simple",
+        "param_index": 1
+    },
+    324: {
+        "description": "Cambiar Apodo de Actor (Change Actor Nickname)",
+        "type": "simple",
+        "param_index": 1
+    },
+    325: {
+        "description": "Cambiar Perfil de Actor (Change Actor Profile)",
+        "type": "simple",
+        "param_index": 1
+    },
+
+    # --- SCRIPTS (CASO AVANZADO) ---
+    355: {
+        "description": "Comando de Script",
+        "type": "script",
+        "param_index": 0,
+        "patterns": [
+            # Ejemplo: $gameVariables.setValue(21, "Texto a traducir");
+            re.compile(r'\$gameVariables\.setValue\(\d+,\s*"(.*?)"\);?'),
+            re.compile(r'\$gameVariables\.setValue\(\d+,\s*\'(.*?)\'\);?'),
+            # Añade aquí otros patrones de script que encuentres
+        ]
+    },
+    655: { # El código 655 es la continuación del 355
+        "description": "Comando de Script (Continuación)",
+        "type": "script",
+        "param_index": 0,
+        "patterns": [
+            re.compile(r'"(.*?)"'),
+            re.compile(r'\'(.*?)\''),
+        ]
+    },
+}
+
+
+# ==============================================================================
+# OTRAS CONFIGURACIONES
 # ==============================================================================
 
 # --- Rutas de Archivos y Directorios ---
 DATA_DIR = 'data/'
 OUTPUT_CSV = 'traducciones.csv'
-# El archivo CSV de entrada para el script de reinyección. Debe ser el mismo que OUTPUT_CSV.
 INPUT_CSV = 'traducciones.csv'
 
-
 # --- Exclusiones de Archivos ---
-# Una lista de nombres de archivos JSON que se ignorarán durante la extracción.
 EXCLUDED_FILES = {'Animations.json', 'MapInfos.json', 'Tilesets.json'}
 
-
-# --- Claves de Diccionario a Procesar o Ignorar ---
-
-# Claves que siempre contienen nombres de archivo y deben ser ignoradas.
+# --- Claves de Diccionario a Procesar o Ignorar (Fuera de los eventos) ---
 FILENAME_KEYS = {'battleback1Name', 'battleback2Name', 'parallaxName', 'characterName', 'faceName'}
-
-# Si una clave 'name' está dentro de un objeto cuya clave es una de estas, se ignorará.
-# Útil para evitar traducir nombres de archivos de audio.
 AUDIO_PARENT_KEYS = {'bgm', 'bgs', 'me', 'se'}
-
-# Claves que generalmente contienen texto seguro para traducir.
 SAFE_TEXT_KEYS = {'name', 'description', 'displayName', 'profile', 'message1', 'message2', 'message3', 'message4'}
 
-
-# --- Códigos de Evento para Extracción de Texto ---
-
-# Códigos de evento que contienen texto en su primer parámetro.
-# Ejemplo: {'code': 401, 'parameters': ['Este es el texto a traducir']}
-EVENT_TEXT_CODES = {
-    401,  # Mostrar texto (línea principal)
-    405,  # Mostrar texto (en ventana con scroll)
-}
-
-# Código de evento para "Mostrar Opciones" (Show Choices).
-# El texto de las opciones se encuentra en una lista en el primer parámetro.
-# Ejemplo: {'code': 102, 'parameters': [['Opción 1', 'Opción 2', ...]]}
-EVENT_CHOICE_CODE = 102
-
-# Código de evento que contiene el nombre del hablante (generalmente parte de "Mostrar Texto").
-# Especifica el código de evento y el índice del parámetro que contiene el nombre.
-# Ejemplo: {'code': 101, 'parameters': [..., ..., ..., ..., 'Nombre del Personaje']}
-EVENT_SPEAKER_NAME_CONFIG = {
-    'code': 101,
-    'param_index': 4
-}
-
-# Código para "Control de Variables" cuando asigna un string a una variable.
-# Esto a menudo tiene una "firma" de parámetros fijos antes del texto.
-# Ejemplo: {'code': 122, 'parameters': [8, 8, 0, 4, '"Texto de la variable"']}
-EVENT_CONTROL_VARIABLE_TEXT_CONFIG = {
-    'code': 122,
-    'param_signature': [8, 8, 0, 4],  # Parámetros fijos que preceden al texto.
-    'param_index': 4                  # Índice del parámetro que contiene el texto.
-}
-
-
 # --- Expresiones Regulares para 'notetags' ---
-# Para extraer texto de campos 'note' que usan un formato específico.
-# La clave (ej. 'breakMsg') se usa en el ID para la reinyección, así que debe ser única.
-# Esta configuración será usada tanto por el extractor como por el reinyector.
+# Para extraer texto de campos 'note'
 NOTETAG_REGEXES = {
     'breakMsg': re.compile(r'<breakMsg:(.*?)>', re.IGNORECASE)
-    # Ejemplo para otro notetag:
-    # 'enemyName': re.compile(r'<Name:(.*?)>', re.IGNORECASE)
 }
 
-# --- Expresiones Regulares para la Reinyección ---
-# Usado por el script de reinyección para encontrar y reemplazar el texto del notetag.
-# Las claves deben coincidir con NOTETAG_REGEXES. El patrón debe tener 3 grupos:
-# 1: El prefijo (<tag:), 2: El texto a reemplazar, 3: El sufijo (>).
+# --- Expresiones Regulares para la Reinyección de 'notetags' ---
 REINJECT_NOTETAG_REGEXES = {
     'breakMsg': re.compile(r'(<breakMsg:)(.*?)(>)', re.IGNORECASE)
-    # Ejemplo:
-    # 'enemyName': re.compile(r'(<Name:)(.*?)(>)', re.IGNORECASE)
 }

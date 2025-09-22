@@ -2,12 +2,10 @@ import os
 import json
 import csv
 import re
-# Cargar toda la configuración desde el archivo config.py
+# Cargar la configuración desde el archivo config.py
 from config import (
     DATA_DIR, OUTPUT_CSV, EXCLUDED_FILES, FILENAME_KEYS, AUDIO_PARENT_KEYS,
-    SAFE_TEXT_KEYS, EVENT_TEXT_CODES, EVENT_CHOICE_CODE,
-    EVENT_SPEAKER_NAME_CONFIG, EVENT_CONTROL_VARIABLE_TEXT_CONFIG,
-    NOTETAG_REGEXES
+    SAFE_TEXT_KEYS, NOTETAG_REGEXES, EXTRACTABLE_EVENT_CODES, EVENT_CODE_HANDLERS
 )
 
 def is_skippable(value):
@@ -33,85 +31,85 @@ def yield_text(base_id, text):
             yield {'id': base_id, 'text': normalized_text}
 
 def find_translatable_text(data, path, filename):
-    if isinstance(data, dict):
-        # Rama 1: Manejar comandos de evento
-        if 'code' in data and 'parameters' in data:
-            code = data.get('code', 0)
-
-            # Texto de evento estándar (ej. Mostrar Texto)
-            if code in EVENT_TEXT_CODES:
-                text = data['parameters'][0]
-                yield from yield_text(f"{filename}:{path}:parameters[0]", text)
-
-            # Opciones de elección (Mostrar Opciones)
-            elif code == EVENT_CHOICE_CODE:
-                choices = data['parameters'][0]
-                for i, choice in enumerate(choices):
-                    yield from yield_text(f"{filename}:{path}:parameters[0][{i}]", choice)
-
-            # Nombre del hablante
-            elif code == EVENT_SPEAKER_NAME_CONFIG['code']:
-                idx = EVENT_SPEAKER_NAME_CONFIG['param_index']
-                if len(data['parameters']) > idx:
-                    text = data['parameters'][idx]
-                    if not is_skippable(text):
-                        yield from yield_text(f"{filename}:{path}:parameters[{idx}]", text)
-
-            # Variable de control con texto
-            elif code == EVENT_CONTROL_VARIABLE_TEXT_CONFIG['code']:
-                params = data['parameters']
-                sig = EVENT_CONTROL_VARIABLE_TEXT_CONFIG['param_signature']
-                idx = EVENT_CONTROL_VARIABLE_TEXT_CONFIG['param_index']
-                # Comprueba que los parámetros comiencen con la firma esperada
-                if len(params) > idx and params[:len(sig)] == sig:
-                    text = params[idx]
-                    if isinstance(text, str):
-                        # A veces el texto viene entre comillas, otras no. Extraemos de todas formas.
-                        yield {'id': f"{filename}:{path}:parameters[{idx}]", 'text': text}
-
-        # Rama 2: Manejar todos los demás objetos (no son comandos de evento)
-        else:
-            parent_key = path.split(':')[-1] if path else ''
-
-            for key, value in data.items():
-                # Regla 1: Ignorar claves que son nombres de archivo
-                if key in FILENAME_KEYS:
-                    continue
-                # Regla 2: Ignorar 'name' si el padre es un objeto de audio
-                if key == 'name' and parent_key in AUDIO_PARENT_KEYS:
-                    continue
-
-                # Regla 3: Ignorar 'name' de un objeto de evento
-                is_map_event = 'pages' in data and 'name' in data and filename.startswith('Map')
-                is_common_event = 'list' in data and 'name' in data and filename == 'CommonEvents.json'
-                if (is_map_event or is_common_event) and key == 'name':
-                    continue
-
-                new_path = f"{path}:{key}" if path else key
-
-                # Manejo especial para el campo 'note' con regex
-                if key == 'note' and isinstance(value, str):
-                    for tag_name, regex in NOTETAG_REGEXES.items():
-                        for match in regex.finditer(value):
-                            if match.group(1):
-                                # Usar un ID especial de 3 partes para el reinyector
-                                special_id = f"{filename}:{new_path}:{tag_name}"
-                                yield from yield_text(special_id, match.group(1))
-                    # Continuar la búsqueda recursiva por si el valor es un objeto complejo
-                    # (aunque 'note' suele ser un string, esto añade robustez)
-                    yield from find_translatable_text(value, new_path, filename)
-
-                elif key in SAFE_TEXT_KEYS and value:
-                    yield from yield_text(f"{filename}:{new_path}", value)
-                else:
-                    yield from find_translatable_text(value, new_path, filename)
-
-    elif isinstance(data, list):
+    # --- PROCESAMIENTO DE LISTAS (DE EVENTOS O DE OTROS ELEMENTOS) ---
+    if isinstance(data, list):
         for i, item in enumerate(data):
             if item is None:
                 continue
             new_path = f"{path}[{i}]"
             yield from find_translatable_text(item, new_path, filename)
+        return
+
+    # --- PROCESAMIENTO DE DICCIONARIOS (OBJETOS JSON) ---
+    if not isinstance(data, dict):
+        return
+
+    # Rama 1: Manejar comandos de evento de forma dinámica
+    if 'code' in data and 'parameters' in data:
+        code = data.get('code', 0)
+        if code in EXTRACTABLE_EVENT_CODES and code in EVENT_CODE_HANDLERS:
+            handler = EVENT_CODE_HANDLERS[code]
+            handler_type = handler.get("type")
+            param_index = handler.get("param_index")
+
+            # --- Lógica de extracción basada en el tipo de manejador ---
+            if handler_type == "simple":
+                if len(data['parameters']) > param_index:
+                    text = data['parameters'][param_index]
+                    yield from yield_text(f"{filename}:{path}:parameters[{param_index}]", text)
+
+            elif handler_type == "array":
+                if len(data['parameters']) > param_index:
+                    choices = data['parameters'][param_index]
+                    if isinstance(choices, list):
+                        for i, choice in enumerate(choices):
+                            yield from yield_text(f"{filename}:{path}:parameters[{param_index}][{i}]", choice)
+
+            elif handler_type == "script":
+                if len(data['parameters']) > param_index:
+                    script_text = data['parameters'][param_index]
+                    patterns = handler.get("patterns", [])
+                    for i, pattern in enumerate(patterns):
+                        for match_num, match in enumerate(pattern.finditer(script_text)):
+                            # Asumimos que el texto que nos interesa es el primer grupo de captura
+                            if match.group(1):
+                                # Creamos un ID único para la reinyección
+                                special_id = f"{filename}:{path}:parameters[{param_index}]:pattern{i}_match{match_num}"
+                                yield from yield_text(special_id, match.group(1))
+        # No continuamos buscando en los parámetros de un comando de evento
+        return
+
+    # Rama 2: Manejar todos los demás objetos (no son comandos de evento)
+    parent_key = path.split(':')[-1] if path else ''
+    for key, value in data.items():
+        # Regla 1: Ignorar claves que son nombres de archivo
+        if key in FILENAME_KEYS:
+            continue
+        # Regla 2: Ignorar 'name' si el padre es un objeto de audio
+        if key == 'name' and parent_key in AUDIO_PARENT_KEYS:
+            continue
+        # Regla 3: Ignorar 'name' de un objeto de evento
+        is_map_event = 'pages' in data and 'name' in data and filename.startswith('Map')
+        is_common_event = 'list' in data and 'name' in data and filename == 'CommonEvents.json'
+        if (is_map_event or is_common_event) and key == 'name':
+            continue
+
+        new_path = f"{path}:{key}" if path else key
+
+        # Manejo especial para el campo 'note' con regex
+        if key == 'note' and isinstance(value, str):
+            for tag_name, regex in NOTETAG_REGEXES.items():
+                for match in regex.finditer(value):
+                    if match.group(1):
+                        special_id = f"{filename}:{new_path}:{tag_name}"
+                        yield from yield_text(special_id, match.group(1))
+            # Continuar la búsqueda recursiva por si el valor es un objeto complejo
+            yield from find_translatable_text(value, new_path, filename)
+
+        elif key in SAFE_TEXT_KEYS and value:
+            yield from yield_text(f"{filename}:{new_path}", value)
+        else:
+            yield from find_translatable_text(value, new_path, filename)
 
 def extract_text_from_system(data, path, filename):
     # Procesar los arrays de "tipos"
