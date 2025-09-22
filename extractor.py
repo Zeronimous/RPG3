@@ -71,11 +71,11 @@ def find_translatable_text(data, path, filename):
                     patterns = handler.get("patterns", [])
                     for i, pattern in enumerate(patterns):
                         for match_num, match in enumerate(pattern.finditer(script_text)):
-                            # Asumimos que el texto que nos interesa es el primer grupo de captura
-                            if match.group(1):
+                            # El nuevo patrón de script captura el texto en el 3er grupo
+                            if len(match.groups()) >= 3 and match.group(3):
                                 # Creamos un ID único para la reinyección
                                 special_id = f"{filename}:{path}:parameters[{param_index}]:pattern{i}_match{match_num}"
-                                yield from yield_text(special_id, match.group(1))
+                                yield from yield_text(special_id, match.group(3))
         # No continuamos buscando en los parámetros de un comando de evento
         return
 

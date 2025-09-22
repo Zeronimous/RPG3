@@ -128,35 +128,43 @@ def main():
 
             # 4. Inyectar textos de scripts con regex
             for script_info in scripts:
-                # Obtener el comando de evento original para obtener el código
-                event_path = script_info['path'].rsplit(':', 1)[0]
-                event_command = get_value_by_path(data, event_path)
-                code = event_command.get('code')
+                try:
+                    # Obtener el comando de evento original para obtener el código
+                    event_path = script_info['path'].rsplit(':', 1)[0]
+                    event_command = get_value_by_path(data, event_path)
+                    code = event_command.get('code')
 
-                if code in EVENT_CODE_HANDLERS and EVENT_CODE_HANDLERS[code]['type'] == 'script':
-                    handler = EVENT_CODE_HANDLERS[code]
-                    param_index = handler['param_index']
-                    pattern = handler['patterns'][script_info['pattern_index']]
+                    if code in EVENT_CODE_HANDLERS and EVENT_CODE_HANDLERS[code]['type'] == 'script':
+                        handler = EVENT_CODE_HANDLERS[code]
+                        param_index = handler['param_index']
+                        pattern = handler['patterns'][script_info['pattern_index']]
 
-                    # Usamos una función para reemplazar solo la n-ésima coincidencia
-                    match_count = 0
-                    target_match = script_info['match_index']
+                        # Usamos una función para reemplazar solo la n-ésima coincidencia
+                        match_count = 0
+                        target_match = script_info['match_index']
 
-                    def repl(matchobj):
-                        nonlocal match_count
-                        if match_count == target_match:
-                            match_count += 1
-                            # Reconstruir el string con el texto traducido
-                            return matchobj.group(0).replace(matchobj.group(1), script_info['text'])
-                        else:
-                            match_count += 1
-                            return matchobj.group(0)
+                        def repl(matchobj):
+                            nonlocal match_count
+                            if match_count == target_match:
+                                match_count += 1
+                                # Reconstruir el string con el texto traducido.
+                                # Esto maneja tanto los casos con prefijo (4 grupos) como sin él (3 grupos).
+                                groups = matchobj.groups()
+                                if len(groups) == 4: # Caso con prefijo
+                                    return f"{groups[0]}{groups[1]}{script_info['text']}{groups[3]}"
+                                else: # Caso sin prefijo (asumimos 3 grupos)
+                                    return f"{groups[0]}{script_info['text']}{groups[2]}"
+                            else:
+                                match_count += 1
+                                return matchobj.group(0)
 
-                    original_script = event_command['parameters'][param_index]
-                    new_script = pattern.sub(repl, original_script)
-                    event_command['parameters'][param_index] = new_script
-                else:
-                    print(f"  Advertencia: No se encontró un manejador de script para el ID: {script_info['id']}")
+                        original_script = event_command['parameters'][param_index]
+                        new_script = pattern.sub(repl, original_script)
+                        event_command['parameters'][param_index] = new_script
+                    else:
+                        print(f"  Advertencia: No se encontró un manejador de script para el ID: {script_info['id']}")
+                except Exception as e:
+                    print(f"  Error inyectando script para ID {script_info.get('id', 'N/A')}: {e}")
 
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)

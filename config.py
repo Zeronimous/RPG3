@@ -84,10 +84,13 @@ EVENT_CODE_HANDLERS = {
         "type": "script",
         "param_index": 0,
         "patterns": [
-            # Ejemplo: $gameVariables.setValue(21, "Texto a traducir");
-            re.compile(r'\$gameVariables\.setValue\(\d+,\s*"(.*?)"\);?'),
-            re.compile(r'\$gameVariables\.setValue\(\d+,\s*\'(.*?)\'\);?'),
-            # Añade aquí otros patrones de script que encuentres
+            # Patrón para: $gameVariables.setValue(X, "Prefijo.Texto");
+            # Grupo 1: $gameVariables.setValue(X, "
+            # Grupo 2: Prefijo.
+            # Grupo 3: Texto
+            # Grupo 4: ");
+            re.compile(r'(\$gameVariables\.setValue\(\d+,\s*")([^.]+\.)(.*?)("\);?)'),
+            re.compile(r'(\$gameVariables\.setValue\(\d+,\s*\')([^.]+\.)(.*?)\'(\);?)'),
         ]
     },
     655: { # El código 655 es la continuación del 355
@@ -95,8 +98,10 @@ EVENT_CODE_HANDLERS = {
         "type": "script",
         "param_index": 0,
         "patterns": [
-            re.compile(r'"(.*?)"'),
-            re.compile(r'\'(.*?)\''),
+            # Nota: Estos patrones asumen que las líneas de continuación no tienen prefijos.
+            # Si los tuvieran, copia el formato de los patrones del código 355.
+            re.compile(r'(")(.*?)(")', re.DOTALL),
+            re.compile(r"(')(.*?)(')", re.DOTALL),
         ]
     },
 }
