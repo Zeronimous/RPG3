@@ -13,7 +13,11 @@ def is_skippable(value):
         return True
 
     stripped_value = value.strip()
-    return not stripped_value or stripped_value.startswith('◆') or stripped_value.startswith('--')
+    # Consideramos "saltable" si está vacío, es un marcador de RPG Maker, o es solo una comilla.
+    return (not stripped_value or
+            stripped_value.startswith('◆') or
+            stripped_value.startswith('--') or
+            stripped_value in ['"', "'"])
 
 def yield_text(base_id, text):
     """
