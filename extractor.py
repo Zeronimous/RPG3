@@ -39,6 +39,7 @@ def yield_text(base_id, text, prefix=""):
             yield {'id': base_id, 'prefix': prefix, 'text': normalized_text}
 
 def find_translatable_text(data, path, filename):
+    match = None  # Inicializar para depurar el error UnboundLocalError
     # --- PROCESAMIENTO DE LISTAS (DE EVENTOS O DE OTROS ELEMENTOS) ---
     if isinstance(data, list):
         for i, item in enumerate(data):
