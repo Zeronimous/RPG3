@@ -83,56 +83,20 @@ EVENT_CODE_HANDLERS = {
         "description": "Comando de Script",
         "type": "script",
         "param_index": 0,
-        "extraction_rules": [
-            # Regla 1: Intentar encontrar un prefijo válido primero.
-            # Prefijo = una palabra (\S+) seguida de un punto (\.)
-            # Texto = empieza inmediatamente después, sin espacios (\S.*?)
-            {
-                "rule_type": "prefix_split",
-                "pattern": re.compile(r'(\$gameVariables\.setValue\(\d+,\s*")(\S+\.)(\S.*?)("\);?)'),
-                "text_group": 3,
-                "reinject_template": r"\g<1>\g<2>{text}\g<4>"
-            },
-            {
-                "rule_type": "prefix_split",
-                "pattern": re.compile(r"(\$gameVariables\.setValue\(\d+,\s*')(\S+\.)(\S.*?)('\);?)"),
-                "text_group": 3,
-                "reinject_template": r"\g<1>\g<2>{text}\g<4>"
-            },
-            # Regla 2: Si no hay prefijo, extraer el string completo.
-            {
-                "rule_type": "full_string",
-                "pattern": re.compile(r'(\$gameVariables\.setValue\(\d+,\s*")(.*?)("\);?)'),
-                "text_group": 2,
-                "reinject_template": r"\g<1>{text}\g<3>"
-            },
-            {
-                "rule_type": "full_string",
-                "pattern": re.compile(r"(\$gameVariables\.setValue\(\d+,\s*')(.*?)('\);?)"),
-                "text_group": 2,
-                "reinject_template": r"\g<1>{text}\g<3>"
-            }
-        ]
+        "prefix_processing": True,  # Aplicar lógica de prefijo a este comando
+        # Patrón para capturar el contenido completo del string
+        # Grupo 1: $gameVariables.setValue(X,
+        # Grupo 2: "String completo con comillas"
+        # Grupo 3: );
+        "pattern": re.compile(r'(\$gameVariables\.setValue\(\d+,\s*)(".*?")(\);?)')
     },
     655: {
         "description": "Comando de Script (Continuación)",
         "type": "script",
         "param_index": 0,
-        "extraction_rules": [
-            # Para las líneas de continuación, asumimos que no hay prefijos complejos.
-            {
-                "rule_type": "full_string",
-                "pattern": re.compile(r'(")(.*?)(")', re.DOTALL),
-                "text_group": 2,
-                "reinject_template": r"\g<1>{text}\g<3>"
-            },
-            {
-                "rule_type": "full_string",
-                "pattern": re.compile(r"(')(.*?)(')", re.DOTALL),
-                "text_group": 2,
-                "reinject_template": r"\g<1>{text}\g<3>"
-            }
-        ]
+        "prefix_processing": False, # No aplicar lógica de prefijo a las continuaciones
+        # Patrón simple para capturar un string entre comillas
+        "pattern": re.compile(r'(")(.*?)(")')
     },
 }
 

@@ -46,6 +46,8 @@ def main():
             reader = csv.DictReader(csvfile)
             for row in reader:
                 if 'id' in row and 'text' in row and row['id'] and row['text'] is not None:
+                    # Asegurarse de que el prefijo sea una cadena, incluso si está ausente en el CSV
+                    row['prefix'] = row.get('prefix', '')
                     translations_by_file[row['id'].split(':')[0]].append(row)
     except Exception as e:
         print(f"Error leyendo el archivo CSV: {e}")
@@ -64,105 +66,79 @@ def main():
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Separar traducciones en 4 categorías: línea única, multilínea, notetags y scripts
-            grouped_multiline = defaultdict(dict)
+            # Clasificar todas las traducciones
+            grouped_multiline = defaultdict(lambda: {'lines': {}})
             single_line = []
             notetags = []
             scripts = []
 
-            # Expresión regular para detectar IDs de script (formato ...:ruleI_matchJ)
-            script_id_regex = re.compile(r'(.+?):rule(\d+)_match(\d+)(?:_(\d+))?$')
+            script_id_regex = re.compile(r'.*:parameters\[\d+\]:match\d+')
 
             for row in rows:
                 full_path = row['id'].split(':', 1)[1]
 
-                # 1. Intentar clasificar como script
-                match_script = script_id_regex.match(full_path)
-                if match_script:
-                    base_path, rule_i, match_j, line_k = match_script.groups()
-                    scripts.append({
-                        'path': base_path,
-                        'rule_index': int(rule_i),
-                        'match_index': int(match_j),
-                        'text': row['text'],
-                        'id': row['id']
-                    })
+                if script_id_regex.match(row['id']):
+                    scripts.append(row)
                     continue
 
-                # 2. Intentar clasificar como notetag
                 match_notetag = re.match(r'(.+):(\w+)$', full_path)
                 if match_notetag:
                     path, tag_name = match_notetag.groups()
                     if tag_name in NOTETAG_REGEXES:
-                        notetags.append({'path': path, 'tag': tag_name, 'text': row['text']})
+                        notetags.append(row)
                         continue
 
-                # 3. Intentar clasificar como multilínea
                 match_multiline = re.match(r'(.+)_(\d+)$', full_path)
                 if match_multiline:
                     base_path, index = match_multiline.groups()
-                    grouped_multiline[base_path][int(index)] = row['text']
+                    grouped_multiline[base_path]['lines'][int(index)] = row['text']
+                    if int(index) == 1:
+                         grouped_multiline[base_path]['prefix'] = row['prefix']
                 else:
-                    # 4. Si no, es una línea única
-                    single_line.append({'path': full_path, 'text': row['text']})
+                    single_line.append(row)
 
-            # --- INYECCIÓN POR CATEGORÍAS ---
-
-            # 1. Inyectar textos de una sola línea
+            # 1. Inyectar textos de una sola línea (NO scripts)
             for t in single_line:
-                set_value_by_path(data, t['path'], t['text'])
+                set_value_by_path(data, t['id'].split(':', 1)[1], t['text'])
 
-            # 2. Inyectar textos multilínea reconstruidos
+            # 2. Inyectar textos multilínea
             for base_path, parts in grouped_multiline.items():
-                final_text = "\n".join(parts[k] for k in sorted(parts.keys()))
+                prefix = parts.get('prefix', '')
+                full_text = "\n".join(parts['lines'][k] for k in sorted(parts['lines'].keys()))
+                final_text = prefix + full_text
                 set_value_by_path(data, base_path, final_text)
 
-            # 3. Inyectar textos de notetags con regex
-            for tag_info in notetags:
-                path = tag_info['path']
-                tag_name = tag_info['tag']
+            # 3. Inyectar notetags
+            for t in notetags:
+                path, tag_name = t['id'].split(':', 1)[1].rsplit(':', 1)
                 regex = REINJECT_NOTETAG_REGEXES[tag_name]
                 original_string = get_value_by_path(data, path)
-                new_string = regex.sub(r'\g<1>' + tag_info['text'] + r'\g<3>', original_string)
+                new_string = regex.sub(r'\g<1>' + t['text'] + r'\g<3>', original_string)
                 set_value_by_path(data, path, new_string)
 
-            # 4. Inyectar textos de scripts con regex
-            for script_info in scripts:
+            # 4. Inyectar scripts
+            for s_info in scripts:
                 try:
-                    # Obtener el comando de evento original para obtener el código
-                    event_path = script_info['path'].rsplit(':', 1)[0]
+                    event_path = s_info['id'].split(':')[1].rsplit(':', 1)[0]
                     event_command = get_value_by_path(data, event_path)
                     code = event_command.get('code')
 
                     if code in EVENT_CODE_HANDLERS and EVENT_CODE_HANDLERS[code]['type'] == 'script':
                         handler = EVENT_CODE_HANDLERS[code]
                         param_index = handler['param_index']
+                        pattern = handler['pattern']
 
-                        # Usar el índice de la regla guardado en el ID
-                        rule = handler['extraction_rules'][script_info['rule_index']]
-                        pattern = rule['pattern']
-                        template = rule['reinject_template'].replace('{text}', re.escape(script_info['text']))
-
-                        # Usamos una función para reemplazar solo la n-ésima coincidencia
-                        match_count = 0
-                        target_match = script_info['match_index']
-
-                        def repl(matchobj):
-                            nonlocal match_count
-                            if match_count == target_match:
-                                match_count += 1
-                                return matchobj.expand(template)
-                            else:
-                                match_count += 1
-                                return matchobj.group(0)
+                        # Reconstruir el texto interno
+                        new_inner_text = s_info['prefix'] + s_info['text']
+                        # Escapar para que sea un literal seguro en la reinyección
+                        new_inner_text_escaped = json.dumps(new_inner_text)
 
                         original_script = event_command['parameters'][param_index]
-                        new_script = pattern.sub(repl, original_script)
+                        # Reemplazar solo la parte del string (grupo 2)
+                        new_script = pattern.sub(r'\g<1>' + new_inner_text_escaped + r'\g<3>', original_script, 1)
                         event_command['parameters'][param_index] = new_script
-                    else:
-                        print(f"  Advertencia: No se encontró un manejador de script para el ID: {script_info['id']}")
                 except Exception as e:
-                    print(f"  Error inyectando script para ID {script_info.get('id', 'N/A')}: {e}")
+                    print(f"  Error inyectando script para ID {s_info.get('id', 'N/A')}: {e}")
 
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
