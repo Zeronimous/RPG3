@@ -70,8 +70,8 @@ def main():
             notetags = []
             scripts = []
 
-            # Expresión regular para detectar IDs de script
-            script_id_regex = re.compile(r'(.+?):pattern(\d+)_match(\d+)(?:_(\d+))?$')
+            # Expresión regular para detectar IDs de script (formato ...:ruleI_matchJ)
+            script_id_regex = re.compile(r'(.+?):rule(\d+)_match(\d+)(?:_(\d+))?$')
 
             for row in rows:
                 full_path = row['id'].split(':', 1)[1]
@@ -79,10 +79,10 @@ def main():
                 # 1. Intentar clasificar como script
                 match_script = script_id_regex.match(full_path)
                 if match_script:
-                    base_path, pattern_i, match_j, line_k = match_script.groups()
+                    base_path, rule_i, match_j, line_k = match_script.groups()
                     scripts.append({
                         'path': base_path,
-                        'pattern_index': int(pattern_i),
+                        'rule_index': int(rule_i),
                         'match_index': int(match_j),
                         'text': row['text'],
                         'id': row['id']
@@ -137,7 +137,11 @@ def main():
                     if code in EVENT_CODE_HANDLERS and EVENT_CODE_HANDLERS[code]['type'] == 'script':
                         handler = EVENT_CODE_HANDLERS[code]
                         param_index = handler['param_index']
-                        pattern = handler['patterns'][script_info['pattern_index']]
+
+                        # Usar el índice de la regla guardado en el ID
+                        rule = handler['extraction_rules'][script_info['rule_index']]
+                        pattern = rule['pattern']
+                        template = rule['reinject_template'].replace('{text}', re.escape(script_info['text']))
 
                         # Usamos una función para reemplazar solo la n-ésima coincidencia
                         match_count = 0
@@ -147,13 +151,7 @@ def main():
                             nonlocal match_count
                             if match_count == target_match:
                                 match_count += 1
-                                # Reconstruir el string con el texto traducido.
-                                # Esto maneja tanto los casos con prefijo (4 grupos) como sin él (3 grupos).
-                                groups = matchobj.groups()
-                                if len(groups) == 4: # Caso con prefijo
-                                    return f"{groups[0]}{groups[1]}{script_info['text']}{groups[3]}"
-                                else: # Caso sin prefijo (asumimos 3 grupos)
-                                    return f"{groups[0]}{script_info['text']}{groups[2]}"
+                                return matchobj.expand(template)
                             else:
                                 match_count += 1
                                 return matchobj.group(0)

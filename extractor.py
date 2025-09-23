@@ -72,14 +72,20 @@ def find_translatable_text(data, path, filename):
             elif handler_type == "script":
                 if len(data['parameters']) > param_index:
                     script_text = data['parameters'][param_index]
-                    patterns = handler.get("patterns", [])
-                    for i, pattern in enumerate(patterns):
+                    rules = handler.get("extraction_rules", [])
+                    for i, rule in enumerate(rules):
+                        pattern = rule["pattern"]
+                        text_group = rule["text_group"]
+                        match_found = False
                         for match_num, match in enumerate(pattern.finditer(script_text)):
-                            # El nuevo patrón de script captura el texto en el 3er grupo
-                            if len(match.groups()) >= 3 and match.group(3):
-                                # Creamos un ID único para la reinyección
-                                special_id = f"{filename}:{path}:parameters[{param_index}]:pattern{i}_match{match_num}"
-                                yield from yield_text(special_id, match.group(3))
+                            if len(match.groups()) >= text_group and match.group(text_group):
+                                # Creamos un ID único que incluye el índice de la regla usada
+                                special_id = f"{filename}:{path}:parameters[{param_index}]:rule{i}_match{match_num}"
+                                yield from yield_text(special_id, match.group(text_group))
+                                match_found = True
+                        # Si una regla tuvo éxito, no probamos las siguientes (para priorizar prefix_split sobre full_string)
+                        if match_found:
+                            break
         # No continuamos buscando en los parámetros de un comando de evento
         return
 
