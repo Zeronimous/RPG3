@@ -83,8 +83,11 @@ def main():
 
                 match_notetag = re.match(r'(.+):(\w+)$', full_path)
                 if match_notetag:
-                    notetags.append(row)
-                    continue
+                    # Comprobar que la etiqueta extraída sea una de las definidas en la config
+                    tag_name = match_notetag.groups()[1]
+                    if tag_name in NOTETAG_REGEXES:
+                        notetags.append(row)
+                        continue
 
                 match_multiline = re.match(r'(.+)_(\d+)$', full_path)
                 if match_multiline:
