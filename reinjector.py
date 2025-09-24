@@ -136,8 +136,9 @@ def main():
 
                         # Reconstruir el texto interno con el prefijo
                         new_inner_text = s_info['prefix'] + s_info['text']
-                        # Escapar para que sea un literal JSON seguro y añadir comillas
-                        new_string_literal = json.dumps(new_inner_text)
+                        # Escapar comillas dobles dentro del texto y luego añadir comillas al principio y al final.
+                        new_inner_text_escaped = new_inner_text.replace('"', '\\"')
+                        new_string_literal = f'"{new_inner_text_escaped}"'
 
                         original_script = event_command['parameters'][param_index]
                         # Reemplazar solo la parte del string (grupo 2 del patrón en config.py)
