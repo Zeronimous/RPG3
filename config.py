@@ -42,9 +42,9 @@ EVENT_CODE_HANDLERS = {
         "description": "Comando de Script (Continuación)",
         "type": "script",
         "param_index": 0,
-        "prefix_processing": False, # No aplicar lógica de prefijo a las continuaciones
-        # Patrón simple para capturar un string entre comillas
-        "pattern": re.compile(r'(")(.*?)(")')
+        "prefix_processing": True,  # Habilitamos la misma lógica que el código 355
+        # Se usa el mismo patrón que el código 355
+        "pattern": re.compile(r'(\$gameVariables\.setValue\(\d+,\s*)(".*?")(\);?)')
     },
 }
 
