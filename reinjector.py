@@ -120,7 +120,10 @@ def main():
             # 4. Inyectar scripts
             for s_info in scripts:
                 try:
-                    event_path = s_info['id'].split(':')[1].rsplit(':', 1)[0]
+                    # La ruta completa al comando de script está en el ID antes del ':match'
+                    full_path = s_info['id'].split(':', 1)[1]
+                    event_path = full_path.rsplit(':', 1)[0]
+
                     event_command = get_value_by_path(data, event_path)
                     code = event_command.get('code')
 
