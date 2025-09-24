@@ -81,31 +81,32 @@ def find_translatable_text(data, path, filename):
                     pattern = handler.get("pattern")
                     if pattern:
                         for match_num, match in enumerate(pattern.finditer(script_text)):
-                        if len(match.groups()) < 2: continue
+                            if len(match.groups()) < 2:
+                                continue
 
-                        # Grupo 2 contiene el string literal completo (ej. '"Prefijo.Texto"')
-                        full_string_literal = match.group(2)
+                            # Grupo 2 contiene el string literal completo (ej. '"Prefijo.Texto"')
+                            full_string_literal = match.group(2)
 
-                        # Quitar comillas para analizar el contenido.
-                        inner_text = full_string_literal[1:-1]
+                            # Quitar comillas para analizar el contenido.
+                            inner_text = full_string_literal[1:-1]
 
-                        prefix_to_yield = ""
-                        text_to_yield = inner_text
+                            prefix_to_yield = ""
+                            text_to_yield = inner_text
 
-                        # Aplicar lógica de prefijos si está activada en config
-                        if handler.get("prefix_processing"):
-                            try:
-                                potential_prefix, potential_text = inner_text.split('.', 1)
-                                # Validar condiciones del prefijo
-                                if ' ' not in potential_prefix.strip() and not potential_text.startswith(' '):
-                                    prefix_to_yield = potential_prefix + '.'
-                                    text_to_yield = potential_text
-                            except ValueError:
-                                # Falla si no hay '.', por lo que no hay prefijo. Se usa el texto completo.
-                                pass
+                            # Aplicar lógica de prefijos si está activada en config
+                            if handler.get("prefix_processing"):
+                                try:
+                                    potential_prefix, potential_text = inner_text.split('.', 1)
+                                    # Validar condiciones del prefijo
+                                    if ' ' not in potential_prefix.strip() and not potential_text.startswith(' '):
+                                        prefix_to_yield = potential_prefix + '.'
+                                        text_to_yield = potential_text
+                                except ValueError:
+                                    # Falla si no hay '.', por lo que no hay prefijo. Se usa el texto completo.
+                                    pass
 
-                        special_id = f"{filename}:{path}:parameters[{param_index}]:match{match_num}"
-                        yield from yield_text(special_id, text_to_yield, prefix_to_yield)
+                            special_id = f"{filename}:{path}:parameters[{param_index}]:match{match_num}"
+                            yield from yield_text(special_id, text_to_yield, prefix_to_yield)
         # No continuamos buscando en los parámetros de un comando de evento
         return
 
@@ -130,7 +131,7 @@ def find_translatable_text(data, path, filename):
         if key == 'note' and isinstance(value, str):
             for tag_name, regex in NOTETAG_REGEXES.items():
                 for match in regex.finditer(value):
-                    if match.group(1):
+                    if match and match.group(1):
                         special_id = f"{filename}:{new_path}:{tag_name}"
                         yield from yield_text(special_id, match.group(1))
             # Continuar la búsqueda recursiva por si el valor es un objeto complejo
