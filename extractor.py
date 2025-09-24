@@ -79,9 +79,8 @@ def find_translatable_text(data, path, filename):
                 if len(data['parameters']) > param_index:
                     script_text = data['parameters'][param_index]
                     pattern = handler.get("pattern")
-                    if not pattern: continue
-
-                    for match_num, match in enumerate(pattern.finditer(script_text)):
+                    if pattern:
+                        for match_num, match in enumerate(pattern.finditer(script_text)):
                         if len(match.groups()) < 2: continue
 
                         # Grupo 2 contiene el string literal completo (ej. '"Prefijo.Texto"')
