@@ -39,7 +39,6 @@ def yield_text(base_id, text, prefix=""):
             yield {'id': base_id, 'prefix': prefix, 'text': normalized_text}
 
 def find_translatable_text(data, path, filename):
-    match = None  # Inicializar para depurar el error UnboundLocalError
     # --- PROCESAMIENTO DE LISTAS (DE EVENTOS O DE OTROS ELEMENTOS) ---
     if isinstance(data, list):
         for i, item in enumerate(data):
@@ -133,7 +132,7 @@ def find_translatable_text(data, path, filename):
         if key == 'note' and isinstance(value, str):
             for tag_name, regex in NOTETAG_REGEXES.items():
                 for match in regex.finditer(value):
-                    if match.group(1):
+                    if match and match.group(1):
                         special_id = f"{filename}:{new_path}:{tag_name}"
                         yield from yield_text(special_id, match.group(1))
             # Continuar la búsqueda recursiva por si el valor es un objeto complejo
