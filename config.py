@@ -31,23 +31,20 @@ EVENT_CODE_HANDLERS = {
         "description": "Comando de Script",
         "type": "script",
         "param_index": 0,
-        "patterns": [
-            # Patrón para: $gameVariables.setValue(X, "Prefijo.Texto");
-            re.compile(r'(\$gameVariables\.setValue\(\d+,\s*")(\S+\.)(\S.*?)("\);?)'),
-            re.compile(r"(\$gameVariables\.setValue\(\d+,\s*')(\S+\.)(\S.*?)('\);?)"),
-            # Fallback: Si no hay prefijo, extraer el string completo.
-            re.compile(r'(\$gameVariables\.setValue\(\d+,\s*")(.*?)("\);?)'),
-            re.compile(r"(\$gameVariables\.setValue\(\d+,\s*')(.*?)('\);?)"),
-        ]
+        "prefix_processing": True,  # Aplicar lógica de prefijo a este comando
+        # Patrón para capturar el contenido completo del string
+        # Grupo 1: $gameVariables.setValue(X,
+        # Grupo 2: "String completo con comillas"
+        # Grupo 3: );
+        "pattern": re.compile(r'(\$gameVariables\.setValue\(\d+,\s*)(".*?")(\);?)')
     },
     655: {
         "description": "Comando de Script (Continuación)",
         "type": "script",
         "param_index": 0,
-        "patterns": [
-            re.compile(r'(")(.*?)(")', re.DOTALL),
-            re.compile(r"(')(.*?)(')", re.DOTALL),
-        ]
+        "prefix_processing": False, # No aplicar lógica de prefijo a las continuaciones
+        # Patrón simple para capturar un string entre comillas
+        "pattern": re.compile(r'(")(.*?)(")')
     },
 }
 

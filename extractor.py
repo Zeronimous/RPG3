@@ -19,20 +19,26 @@ def is_skippable(value):
             stripped_value.startswith('--') or
             stripped_value in ['"', "'"])
 
-def yield_text(base_id, text):
+def yield_text(base_id, text, prefix=""):
     """
-    Ayudante para generar texto. Normaliza los saltos de línea y, si el texto
-    es multilínea, lo divide y añade sufijos al ID. Filtra líneas no deseadas.
+    Ayudante para generar texto. Normaliza saltos de línea, filtra líneas
+    no deseadas y, si el texto es multilínea, lo divide y añade sufijos al ID.
+    También propaga el prefijo si existe.
     """
+    if not text:
+        return
+
     normalized_text = text.replace('\\n', '\n')
     if '\n' in normalized_text:
         lines = normalized_text.split('\n')
         for i, line in enumerate(lines):
             if not is_skippable(line):
-                yield {'id': f"{base_id}_{i+1}", 'text': line}
+                # El prefijo solo se asocia con la primera línea de un texto multilínea
+                current_prefix = prefix if i == 0 else ""
+                yield {'id': f"{base_id}_{i+1}", 'prefix': current_prefix, 'text': line}
     else:
         if not is_skippable(normalized_text):
-            yield {'id': base_id, 'text': normalized_text}
+            yield {'id': base_id, 'prefix': prefix, 'text': normalized_text}
 
 def find_translatable_text(data, path, filename):
     # --- PROCESAMIENTO DE LISTAS (DE EVENTOS O DE OTROS ELEMENTOS) ---
@@ -72,14 +78,35 @@ def find_translatable_text(data, path, filename):
             elif handler_type == "script":
                 if len(data['parameters']) > param_index:
                     script_text = data['parameters'][param_index]
-                    patterns = handler.get("patterns", [])
-                    for i, pattern in enumerate(patterns):
-                        for match_num, match in enumerate(pattern.finditer(script_text)):
-                            # El nuevo patrón de script captura el texto en el 3er grupo
-                            if len(match.groups()) >= 3 and match.group(3):
-                                # Creamos un ID único para la reinyección
-                                special_id = f"{filename}:{path}:parameters[{param_index}]:pattern{i}_match{match_num}"
-                                yield from yield_text(special_id, match.group(3))
+                    pattern = handler.get("pattern")
+                    if not pattern: continue
+
+                    for match_num, match in enumerate(pattern.finditer(script_text)):
+                        if len(match.groups()) < 2: continue
+
+                        # Grupo 2 contiene el string literal completo (ej. '"Prefijo.Texto"')
+                        full_string_literal = match.group(2)
+
+                        # Quitar comillas para analizar el contenido.
+                        inner_text = full_string_literal[1:-1]
+
+                        prefix_to_yield = ""
+                        text_to_yield = inner_text
+
+                        # Aplicar lógica de prefijos si está activada en config
+                        if handler.get("prefix_processing"):
+                            try:
+                                potential_prefix, potential_text = inner_text.split('.', 1)
+                                # Validar condiciones del prefijo
+                                if ' ' not in potential_prefix.strip() and not potential_text.startswith(' '):
+                                    prefix_to_yield = potential_prefix + '.'
+                                    text_to_yield = potential_text
+                            except ValueError:
+                                # Falla si no hay '.', por lo que no hay prefijo. Se usa el texto completo.
+                                pass
+
+                        special_id = f"{filename}:{path}:parameters[{param_index}]:match{match_num}"
+                        yield from yield_text(special_id, text_to_yield, prefix_to_yield)
         # No continuamos buscando en los parámetros de un comando de evento
         return
 
@@ -104,8 +131,7 @@ def find_translatable_text(data, path, filename):
         if key == 'note' and isinstance(value, str):
             for tag_name, regex in NOTETAG_REGEXES.items():
                 for match in regex.finditer(value):
-                    # Añadida guarda de seguridad para prevenir el error 'NoneType'
-                    if match and match.group(1):
+                    if match.group(1):
                         special_id = f"{filename}:{new_path}:{tag_name}"
                         yield from yield_text(special_id, match.group(1))
             # Continuar la búsqueda recursiva por si el valor es un objeto complejo
@@ -183,7 +209,8 @@ def main():
 
     try:
         with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=['id', 'text'])
+            # Añadimos la nueva columna 'prefix' al CSV
+            writer = csv.DictWriter(csvfile, fieldnames=['id', 'prefix', 'text'])
             writer.writeheader()
             writer.writerows(all_texts)
         print(f"\nExtracción completada. Se encontraron {len(all_texts)} líneas de texto.")
