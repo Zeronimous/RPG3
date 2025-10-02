@@ -42,11 +42,11 @@ def main():
 
     translations_by_file = defaultdict(list)
     try:
-        with open(INPUT_CSV, 'r', encoding='utf-8-sig') as csvfile:
-            # Leer el archivo usando tabuladores como delimitador
-            reader = csv.DictReader(csvfile, delimiter='\t')
+        with open(INPUT_CSV, 'r', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
             for row in reader:
                 if 'id' in row and 'text' in row and row['id']:
+                    # Asegurarse de que el prefijo sea una cadena, incluso si está ausente en el CSV
                     row['prefix'] = row.get('prefix', '')
                     translations_by_file[row['id'].split(':')[0]].append(row)
     except Exception as e:
@@ -66,51 +66,66 @@ def main():
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Agrupar textos multilínea
-            grouped_multiline = defaultdict(lambda: {'lines': {}, 'prefix': ''})
-            single_translations = []
+            # Clasificar todas las traducciones
+            grouped_multiline = defaultdict(lambda: {'lines': {}})
+            single_line = []
+            notetags = []
+            scripts = []
+
+            script_id_regex = re.compile(r'.*:parameters\[\d+\]:match\d+')
 
             for row in rows:
-                match_multiline = re.match(r'(.+)_(\d+)$', row['id'])
+                full_path = row['id'].split(':', 1)[1]
+
+                if script_id_regex.match(row['id']):
+                    scripts.append(row)
+                    continue
+
+                match_notetag = re.match(r'(.+):(\w+)$', full_path)
+                if match_notetag:
+                    # Comprobar que la etiqueta extraída sea una de las definidas en la config
+                    tag_name = match_notetag.groups()[1]
+                    if tag_name in NOTETAG_REGEXES:
+                        notetags.append(row)
+                        continue
+
+                match_multiline = re.match(r'(.+)_(\d+)$', full_path)
                 if match_multiline:
-                    base_id, index = match_multiline.groups()
-                    grouped_multiline[base_id]['lines'][int(index)] = row['text']
-                    if int(index) == 1 and row['prefix']:
-                        grouped_multiline[base_id]['prefix'] = row['prefix']
+                    base_path, index = match_multiline.groups()
+                    grouped_multiline[base_path]['lines'][int(index)] = row['text']
+                    if int(index) == 1:
+                         grouped_multiline[base_path]['prefix'] = row['prefix']
                 else:
-                    single_translations.append(row)
+                    single_line.append(row)
 
-            # Inyectar textos multilínea
-            for base_id, parts in grouped_multiline.items():
-                # Para textos simples, reconstruir la ruta completa
-                if parts['prefix']:
-                    # Si es un texto simple multilínea, el prefijo es la clave
-                    if not parts['prefix'].endswith('.'):
-                         final_path = f"{base_id}:{parts['prefix']}"
-                         final_text = "\n".join(parts['lines'][k] for k in sorted(parts['lines'].keys()))
-                         set_value_by_path(data, final_path, final_text)
-                         continue
+            # 1. Inyectar textos de una sola línea (NO scripts)
+            for t in single_line:
+                set_value_by_path(data, t['id'].split(':', 1)[1], t['text'])
 
-                # Para scripts y otros, el ID ya es la ruta completa
+            # 2. Inyectar textos multilínea
+            for base_path, parts in grouped_multiline.items():
+                prefix = parts.get('prefix', '')
                 full_text = "\n".join(parts['lines'][k] for k in sorted(parts['lines'].keys()))
-                final_text = parts['prefix'] + full_text
-                set_value_by_path(data, base_id, final_text)
+                final_text = prefix + full_text
+                set_value_by_path(data, base_path, final_text)
 
+            # 3. Inyectar notetags
+            for t in notetags:
+                path, tag_name = t['id'].split(':', 1)[1].rsplit(':', 1)
+                regex = REINJECT_NOTETAG_REGEXES[tag_name]
+                original_string = get_value_by_path(data, path)
+                new_string = regex.sub(r'\g<1>' + t['text'] + r'\g<3>', original_string)
+                set_value_by_path(data, path, new_string)
 
-            # Inyectar todos los demás textos
-            for row in single_translations:
-                full_id = row['id']
-                prefix = row['prefix']
-                text = row['text']
-                final_text = prefix + text
-                path_to_set = ""
+            # 4. Inyectar scripts
+            for s_info in scripts:
+                try:
+                    # La ruta completa al *parámetro* del script está en el ID antes del ':match'
+                    full_path = s_info['id'].split(':', 1)[1]
+                    param_path = full_path.rsplit(':', 1)[0]
+                    # La ruta al *comando* de evento está un nivel más arriba
+                    event_path = param_path.rsplit(':', 1)[0]
 
-                # Diferenciar entre un script y un texto simple
-                is_script = ':match' in full_id
-                is_notetag = not is_script and (':' in prefix) # Heurística para notetags
-
-                if is_script:
-                    event_path = full_id.split(':', 1)[1].rsplit(':', 1)[0]
                     event_command = get_value_by_path(data, event_path)
                     code = event_command.get('code')
 
@@ -119,28 +134,18 @@ def main():
                         param_index = handler['param_index']
                         pattern = handler['pattern']
 
-                        new_string_literal = json.dumps(final_text)
+                        # Reconstruir el texto interno con el prefijo
+                        new_inner_text = s_info['prefix'] + s_info['text']
+                        # Escapar comillas dobles dentro del texto y luego añadir comillas al principio y al final.
+                        new_inner_text_escaped = new_inner_text.replace('"', '\\"')
+                        new_string_literal = f'"{new_inner_text_escaped}"'
+
                         original_script = event_command['parameters'][param_index]
+                        # Reemplazar solo la parte del string (grupo 2 del patrón en config.py)
                         new_script = pattern.sub(r'\g<1>' + new_string_literal + r'\g<3>', original_script, 1)
                         event_command['parameters'][param_index] = new_script
-                    continue
-
-                elif is_notetag:
-                    path, tag_name = prefix.rsplit(':', 1)
-                    regex = REINJECT_NOTETAG_REGEXES[tag_name]
-                    original_string = get_value_by_path(data, path)
-                    new_string = regex.sub(r'\g<1>' + text + r'\g<3>', original_string)
-                    set_value_by_path(data, path, new_string)
-                    continue
-
-                else:
-                    # Es un texto simple, reconstruir la ruta
-                    path_to_set = f"{full_id}:{prefix}" if prefix else full_id
-                    # Para textos simples, el prefijo no es parte del texto final
-                    final_text = text
-
-                set_value_by_path(data, path_to_set.split(':', 1)[1], final_text)
-
+                except Exception as e:
+                    print(f"  Error inyectando script para ID {s_info.get('id', 'N/A')}: {e}")
 
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
