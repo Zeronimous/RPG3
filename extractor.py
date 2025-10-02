@@ -208,12 +208,22 @@ def main():
     all_texts.sort(key=lambda x: x['id'])
 
     try:
-        # Usar utf-8-sig para añadir la marca de orden de bytes (BOM) que Excel necesita
-        with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            # Añadimos la nueva columna 'prefix' al CSV y usamos punto y coma como delimitador
-            writer = csv.DictWriter(csvfile, fieldnames=['id', 'prefix', 'text'], delimiter=';')
-            writer.writeheader()
-            writer.writerows(all_texts)
+        print(f"Escribiendo {len(all_texts)} líneas en {OUTPUT_CSV}...")
+        # Escritura manual del CSV para máximo control y compatibilidad
+        with open(OUTPUT_CSV, 'w', encoding='utf-8-sig') as f:
+            # Escribir la cabecera
+            f.write("id;prefix;text\n")
+            # Escribir cada fila
+            for row in all_texts:
+                # Limpiar saltos de línea y escapar comillas dobles dentro de cada campo
+                # para asegurar un formato CSV válido.
+                id_val = str(row.get('id', '')).replace('"', '""')
+                prefix_val = str(row.get('prefix', '')).replace('"', '""')
+                text_val = str(row.get('text', '')).replace('\n', '\\n').replace('"', '""')
+
+                # Escribir la línea, encerrando cada campo entre comillas
+                f.write(f'"{id_val}";"{prefix_val}";"{text_val}"\n')
+
         print(f"\nExtracción completada. Se encontraron {len(all_texts)} líneas de texto.")
         print(f"Archivo de salida: {OUTPUT_CSV}")
     except IOError:
