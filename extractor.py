@@ -208,7 +208,8 @@ def main():
     all_texts.sort(key=lambda x: x['id'])
 
     try:
-        with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8') as csvfile:
+        # Usar utf-8-sig para añadir la marca de orden de bytes (BOM) que Excel necesita
+        with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8-sig') as csvfile:
             # Añadimos la nueva columna 'prefix' al CSV y usamos punto y coma como delimitador
             writer = csv.DictWriter(csvfile, fieldnames=['id', 'prefix', 'text'], delimiter=';')
             writer.writeheader()
