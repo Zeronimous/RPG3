@@ -43,7 +43,7 @@ def main():
     translations_by_file = defaultdict(list)
     try:
         with open(INPUT_CSV, 'r', encoding='utf-8') as csvfile:
-            reader = csv.DictReader(csvfile)
+            reader = csv.DictReader(csvfile, delimiter=';')
             for row in reader:
                 if 'id' in row and 'text' in row and row['id']:
                     # Asegurarse de que el prefijo sea una cadena, incluso si está ausente en el CSV

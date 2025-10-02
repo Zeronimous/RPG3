@@ -209,8 +209,8 @@ def main():
 
     try:
         with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8') as csvfile:
-            # Añadimos la nueva columna 'prefix' al CSV
-            writer = csv.DictWriter(csvfile, fieldnames=['id', 'prefix', 'text'])
+            # Añadimos la nueva columna 'prefix' al CSV y usamos punto y coma como delimitador
+            writer = csv.DictWriter(csvfile, fieldnames=['id', 'prefix', 'text'], delimiter=';')
             writer.writeheader()
             writer.writerows(all_texts)
         print(f"\nExtracción completada. Se encontraron {len(all_texts)} líneas de texto.")
