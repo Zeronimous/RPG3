@@ -19,26 +19,40 @@ def is_skippable(value):
             stripped_value.startswith('--') or
             stripped_value in ['"', "'"])
 
-def yield_text(base_id, text, prefix=""):
+def yield_text(base_id, text, prefix="", is_simple_key=False):
     """
     Ayudante para generar texto. Normaliza saltos de línea, filtra líneas
     no deseadas y, si el texto es multilínea, lo divide y añade sufijos al ID.
-    También propaga el prefijo si existe.
+    También propaga el prefijo si existe y divide el ID para textos simples.
     """
     if not text:
         return
+
+    final_id = base_id
+    final_prefix = prefix
+
+    # Para textos simples (no de scripts), dividimos el ID en ruta (id) y clave (prefix)
+    if is_simple_key and not prefix and ':' in base_id:
+        try:
+            path_part, key_part = base_id.rsplit(':', 1)
+            if '[' not in key_part:
+                final_id = path_part
+                final_prefix = key_part
+        except ValueError:
+            pass
 
     normalized_text = text.replace('\\n', '\n')
     if '\n' in normalized_text:
         lines = normalized_text.split('\n')
         for i, line in enumerate(lines):
             if not is_skippable(line):
-                # El prefijo solo se asocia con la primera línea de un texto multilínea
-                current_prefix = prefix if i == 0 else ""
+                # El prefijo (la clave) solo se asocia con la primera línea
+                current_prefix = final_prefix if i == 0 else ""
+                # Para multilínea, el ID debe ser consistente y completo
                 yield {'id': f"{base_id}_{i+1}", 'prefix': current_prefix, 'text': line}
     else:
         if not is_skippable(normalized_text):
-            yield {'id': base_id, 'prefix': prefix, 'text': normalized_text}
+            yield {'id': final_id, 'prefix': final_prefix, 'text': normalized_text}
 
 def find_translatable_text(data, path, filename):
     # --- PROCESAMIENTO DE LISTAS (DE EVENTOS O DE OTROS ELEMENTOS) ---
@@ -62,18 +76,17 @@ def find_translatable_text(data, path, filename):
             handler_type = handler.get("type")
             param_index = handler.get("param_index")
 
-            # --- Lógica de extracción basada en el tipo de manejador ---
             if handler_type == "simple":
                 if len(data['parameters']) > param_index:
                     text = data['parameters'][param_index]
-                    yield from yield_text(f"{filename}:{path}:parameters[{param_index}]", text)
+                    yield from yield_text(f"{filename}:{path}:parameters[{param_index}]", text, is_simple_key=True)
 
             elif handler_type == "array":
                 if len(data['parameters']) > param_index:
                     choices = data['parameters'][param_index]
                     if isinstance(choices, list):
                         for i, choice in enumerate(choices):
-                            yield from yield_text(f"{filename}:{path}:parameters[{param_index}][{i}]", choice)
+                            yield from yield_text(f"{filename}:{path}:parameters[{param_index}][{i}]", choice, is_simple_key=True)
 
             elif handler_type == "script":
                 if len(data['parameters']) > param_index:
@@ -84,88 +97,69 @@ def find_translatable_text(data, path, filename):
                             if len(match.groups()) < 2:
                                 continue
 
-                            # Grupo 2 contiene el string literal completo (ej. '"Prefijo.Texto"')
                             full_string_literal = match.group(2)
-
-                            # Quitar comillas para analizar el contenido.
                             inner_text = full_string_literal[1:-1]
 
                             prefix_to_yield = ""
                             text_to_yield = inner_text
 
-                            # Aplicar lógica de prefijos si está activada en config
                             if handler.get("prefix_processing"):
                                 try:
                                     potential_prefix, potential_text = inner_text.split('.', 1)
-                                    # Validar condiciones del prefijo
                                     if ' ' not in potential_prefix.strip() and not potential_text.startswith(' '):
                                         prefix_to_yield = potential_prefix + '.'
                                         text_to_yield = potential_text
                                 except ValueError:
-                                    # Falla si no hay '.', por lo que no hay prefijo. Se usa el texto completo.
                                     pass
 
                             special_id = f"{filename}:{path}:parameters[{param_index}]:match{match_num}"
-                            yield from yield_text(special_id, text_to_yield, prefix_to_yield)
-        # No continuamos buscando en los parámetros de un comando de evento
+                            yield from yield_text(special_id, text_to_yield, prefix=prefix_to_yield)
         return
 
-    # Rama 2: Manejar todos los demás objetos (no son comandos de evento)
-    parent_key = path.split(':')[-1] if path else ''
+    # Rama 2: Manejar todos los demás objetos
     for key, value in data.items():
-        # Regla 1: Ignorar claves que son nombres de archivo
-        if key in FILENAME_KEYS:
-            continue
-        # Regla 2: Ignorar 'name' si el padre es un objeto de audio
-        if key == 'name' and parent_key in AUDIO_PARENT_KEYS:
-            continue
-        # Regla 3: Ignorar 'name' de un objeto de evento
+        if key in FILENAME_KEYS: continue
+        if key == 'name' and path.split(':')[-1] in AUDIO_PARENT_KEYS: continue
+
         is_map_event = 'pages' in data and 'name' in data and filename.startswith('Map')
         is_common_event = 'list' in data and 'name' in data and filename == 'CommonEvents.json'
-        if (is_map_event or is_common_event) and key == 'name':
-            continue
+        if (is_map_event or is_common_event) and key == 'name': continue
 
         new_path = f"{path}:{key}" if path else key
 
-        # Manejo especial para el campo 'note' con regex
         if key == 'note' and isinstance(value, str):
             for tag_name, regex in NOTETAG_REGEXES.items():
                 for match in regex.finditer(value):
                     if match and match.group(1):
                         special_id = f"{filename}:{new_path}:{tag_name}"
-                        yield from yield_text(special_id, match.group(1))
-            # Continuar la búsqueda recursiva por si el valor es un objeto complejo
+                        yield from yield_text(special_id, match.group(1), is_simple_key=True)
             yield from find_translatable_text(value, new_path, filename)
 
         elif key in SAFE_TEXT_KEYS and value:
-            yield from yield_text(f"{filename}:{new_path}", value)
+            yield from yield_text(f"{filename}:{new_path}", value, is_simple_key=True)
         else:
             yield from find_translatable_text(value, new_path, filename)
 
 def extract_text_from_system(data, path, filename):
-    # Procesar los arrays de "tipos"
     type_arrays = ['armorTypes', 'elements', 'equipTypes', 'skillTypes', 'weaponTypes']
     for array_name in type_arrays:
         if array_name in data and isinstance(data[array_name], list):
             for i, text in enumerate(data[array_name]):
-                # El primer elemento a menudo es nulo o vacío
-                if i == 0 and not text:
-                    continue
+                if i == 0 and not text: continue
                 if text:
-                    yield from yield_text(f"{filename}:{array_name}[{i}]", text)
+                    yield from yield_text(f"{filename}:{array_name}[{i}]", text, is_simple_key=True)
 
-    # Procesar el objeto "terms"
     if 'terms' in data:
         terms = data['terms']
         for category in ['basic', 'commands', 'params']:
             if category in terms:
                 for i, text in enumerate(terms[category]):
-                    if text: # Añadida comprobación para evitar valores nulos
-                        yield from yield_text(f"{filename}:terms:{category}[{i}]", text)
+                    if text:
+                        yield from yield_text(f"{filename}:terms:{category}[{i}]", text, is_simple_key=True)
         if 'messages' in terms:
             for key, text in terms['messages'].items():
-                if text: # Añadida comprobación para evitar valores nulos
-                    yield from yield_text(f"{filename}:terms:messages:{key}", text)
+                if text:
+                    yield from yield_text(f"{filename}:terms:messages:{key}", text, is_simple_key=True)
 
 def main():
     all_texts = []
@@ -186,8 +180,7 @@ def main():
         with open(filepath, 'r', encoding='utf-8') as f:
             try:
                 data = json.load(f)
-                if not data:
-                    continue
+                if not data: continue
 
                 results = []
                 if filename == 'System.json':
@@ -209,20 +202,18 @@ def main():
 
     try:
         print(f"Escribiendo {len(all_texts)} líneas en {OUTPUT_CSV}...")
-        # Escritura manual del CSV para máximo control y compatibilidad
         with open(OUTPUT_CSV, 'w', encoding='utf-8-sig') as f:
-            # Escribir la cabecera
-            f.write("id;prefix;text\n")
+            # Escribir la cabecera con tabuladores
+            f.write("id\tprefix\ttext\n")
             # Escribir cada fila
             for row in all_texts:
-                # Limpiar saltos de línea y escapar comillas dobles dentro de cada campo
-                # para asegurar un formato CSV válido.
-                id_val = str(row.get('id', '')).replace('"', '""')
-                prefix_val = str(row.get('prefix', '')).replace('"', '""')
-                text_val = str(row.get('text', '')).replace('\n', '\\n').replace('"', '""')
+                id_val = str(row.get('id', ''))
+                prefix_val = str(row.get('prefix', ''))
+                # Reemplazar tabuladores en el texto para no corromper el formato
+                text_val = str(row.get('text', '')).replace('\n', '\\n').replace('\t', ' ')
 
-                # Escribir la línea, encerrando cada campo entre comillas
-                f.write(f'"{id_val}";"{prefix_val}";"{text_val}"\n')
+                # Escribir la línea, sin comillas y separada por tabuladores
+                f.write(f"{id_val}\t{prefix_val}\t{text_val}\n")
 
         print(f"\nExtracción completada. Se encontraron {len(all_texts)} líneas de texto.")
         print(f"Archivo de salida: {OUTPUT_CSV}")
